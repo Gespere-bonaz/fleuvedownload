@@ -266,3 +266,9 @@ html.linux, html.linux body, html.linux #root { background: transparent; }
 .winctl__btn:hover { filter: brightness(.92); background: rgba(0, 0, 0, .1); }
 .winctl__btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
 @media (prefers-color-scheme: dark) { .winctl__btn:hover { background: rgba(255, 255, 255, .14); filter: none; } }
+
+/* Choix de la qualité vidéo */
+.field select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); }
+.linux .field select { border: 0; background: var(--bg-hover); border-radius: 8px; padding: 8px 10px; }
+.linkbtn { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; cursor: pointer; }
+.linkbtn:hover { text-decoration: underline; }

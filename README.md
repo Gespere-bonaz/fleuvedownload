@@ -19,6 +19,7 @@ Personal project by Gespère BONAZEBI — a **functional** reverse-engineering: 
 - **Browser integration**: a Chrome extension (also Edge, Brave, Arc) that intercepts downloads, adds "Download with Fleuve" to the right-click menu and detects the videos and audio on the page.
 - **HLS video capture** (.m3u8): the best quality is picked automatically, chunks are downloaded in parallel and then merged.
 - **Site videos** (YouTube, Vimeo, …) through [yt-dlp](https://github.com/yt-dlp/yt-dlp) when it is installed.
+- **Choose the video quality**: in **Settings → Video quality**, pick *Ask every time* (Fleuve detects the qualities the site really offers and lets you choose, with the estimated size), *Always the best*, or a maximum (2160p to 360p). The quality can also be chosen for each link in the **Add** dialog. Works for HLS streams and site videos.
 - **Queue, scheduler, speed limit**, and automatic sorting by category.
 - **Native look on each system**: macOS style on the Mac; on Linux, a clean GNOME-inspired theme with an integrated header bar and rounded window corners. Light and dark mode follow the system.
 
@@ -95,7 +96,7 @@ If Fleuve is closed, the browser downloads normally.
 ## Tests
 
 ```bash
-cargo test -p fleuve-core          # 21 tests: segmentation, resume, HLS, queue, speed limit, link security
+cargo test -p fleuve-core          # 24 tests: segmentation, resume, HLS, video quality, queue, speed limit, link security
 cargo run -p fleuve-core --example sans_interface -- ./data ./downloads
 ```
 

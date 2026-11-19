@@ -110,6 +110,12 @@ pub struct DownloadRecord {
     pub completed_at: Option<i64>,
     #[serde(default)]
     pub error: Option<String>,
+    /// Hauteur d'image maximale pour une vidéo (720 = 720p) ; `None` = la meilleure.
+    #[serde(default)]
+    pub max_height: Option<u32>,
+    /// Vidéo en attente du choix de qualité (réglage « Demander à chaque fois »).
+    #[serde(default)]
+    pub quality_pending: bool,
 }
 
 impl DownloadRecord {
@@ -150,6 +156,27 @@ pub struct DownloadView {
     pub scheduled_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub error: Option<String>,
+    pub max_height: Option<u32>,
+    pub quality_pending: bool,
+}
+
+/// Une qualité proposée pour une vidéo.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityOption {
+    /// Hauteur d'image (1080 pour 1080p).
+    pub height: u32,
+    /// Taille estimée en octets, quand le site la donne.
+    pub size: Option<u64>,
+}
+
+/// Lit un choix de qualité : « best » (ou vide) = la meilleure, « 720 » = 720p au plus.
+pub fn parse_quality(q: &str) -> Option<u32> {
+    q.trim().trim_end_matches('p').parse().ok().filter(|h| *h > 0)
+}
+
+fn default_video_quality() -> String {
+    "best".into()
 }
 
 /// Demande d'ajout (depuis l'interface ou l'extension).
@@ -171,6 +198,9 @@ pub struct AddRequest {
     /// Forcer le type ; sinon détecté à partir de l'URL.
     #[serde(default)]
     pub kind: Option<Kind>,
+    /// Qualité vidéo : « best » ou une hauteur (« 720 »). Absent : selon les réglages.
+    #[serde(default)]
+    pub quality: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -188,6 +218,9 @@ pub struct Settings {
     /// Jeton partagé avec l'extension navigateur.
     pub extension_token: String,
     pub server_port: u16,
+    /// Qualité des vidéos : « ask » (demander), « best », ou une hauteur maximale (« 1080 »).
+    #[serde(default = "default_video_quality")]
+    pub video_quality: String,
 }
 
 impl Settings {
@@ -200,6 +233,7 @@ impl Settings {
             sort_by_category: true,
             extension_token: uuid::Uuid::new_v4().simple().to_string(),
             server_port: 47821,
+            video_quality: default_video_quality(),
         }
     }
 }

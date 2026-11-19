@@ -1,6 +1,6 @@
 //! Couche Tauri : relie le moteur `fleuve-core` à l'interface React.
 
-use fleuve_core::{server, AddRequest, DownloadView, Manager as Engine, Settings};
+use fleuve_core::{server, AddRequest, DownloadView, Manager as Engine, QualityOption, RequestHeaders, Settings};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -49,6 +49,27 @@ fn schedule_download(engine: State<'_, Engine>, id: String, at: i64) -> CmdResul
 #[tauri::command]
 fn remove_download(engine: State<'_, Engine>, id: String, delete_file: bool) -> CmdResult<()> {
     engine.remove(&id, delete_file).map_err(err)
+}
+
+#[tauri::command]
+fn set_quality(engine: State<'_, Engine>, id: String, quality: String) -> CmdResult<()> {
+    engine.set_quality(&id, &quality).map_err(err)
+}
+
+#[tauri::command]
+fn is_video_url(url: String) -> bool {
+    Engine::is_video_url(url.trim())
+}
+
+#[tauri::command]
+async fn probe_qualities(engine: State<'_, Engine>, url: String, referer: Option<String>) -> CmdResult<Vec<QualityOption>> {
+    let headers = RequestHeaders { referer, ..Default::default() };
+    engine.probe_qualities(url.trim(), &headers).await.map_err(err)
+}
+
+#[tauri::command]
+async fn probe_qualities_for(engine: State<'_, Engine>, id: String) -> CmdResult<Vec<QualityOption>> {
+    engine.probe_qualities_for(&id).await.map_err(err)
 }
 
 #[tauri::command]
@@ -134,6 +155,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_downloads,
             add_downloads,
+            set_quality,
+            is_video_url,
+            probe_qualities,
+            probe_qualities_for,
             pause_download,
             pause_all,
             clear_list,

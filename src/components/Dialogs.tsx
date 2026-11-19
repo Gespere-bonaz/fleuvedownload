@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api } from "../api";
+import { QualitySelect, initialQuality } from "./Quality";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import type { AddRequest, Settings } from "../types";
 
@@ -40,11 +42,14 @@ async function pickFolder(current?: string): Promise<string | null> {
 export function AddDialog({
   initialUrl,
   defaultDir,
+  defaultQuality,
   onClose,
   onAdd,
 }: {
   initialUrl: string;
   defaultDir: string;
+  /** Réglage « Qualité vidéo » (« ask », « best », « 720 »…). */
+  defaultQuality: string;
   onClose: () => void;
   onAdd: (reqs: AddRequest[]) => Promise<void>;
 }) {
@@ -61,6 +66,32 @@ export function AddDialog({
 
   const lines = urls.split(/\s+/).map((l) => l.trim()).filter(Boolean);
 
+  // Vidéo (flux HLS ou site vidéo) : on propose la qualité.
+  const [quality, setQuality] = useState(initialQuality(defaultQuality));
+  const [videoUrls, setVideoUrls] = useState<string[]>([]);
+  const linesKey = lines.join("\n");
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      Promise.all(lines.map((u) => api.isVideoUrl(u).then((v) => (v ? u : null)).catch(() => null))).then((r) =>
+        setVideoUrls(r.filter((u): u is string => u !== null)),
+      );
+    }, 300);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [linesKey]);
+  const singleVideo = lines.length === 1 && videoUrls.length === 1 ? videoUrls[0] : null;
+  const ref0 = referer.trim();
+  const [probeKey, setProbeKey] = useState({ url: "", referer: "" });
+  useEffect(() => {
+    // Détection lancée après une courte pause de saisie.
+    const t = window.setTimeout(() => setProbeKey({ url: singleVideo ?? "", referer: ref0 }), 500);
+    return () => window.clearTimeout(t);
+  }, [singleVideo, ref0]);
+  const load = useMemo(
+    () => (probeKey.url ? () => api.probeQualities(probeKey.url, probeKey.referer) : null),
+    [probeKey],
+  );
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (lines.length === 0) return setError("Collez au moins un lien.");
@@ -76,6 +107,7 @@ export function AddDialog({
           headers: referer.trim() ? { referer: referer.trim() } : {},
           scheduledAt,
           startPaused: when === "paused",
+          quality: videoUrls.length > 0 ? quality : null,
         })),
       );
       onClose();
@@ -103,6 +135,12 @@ export function AddDialog({
           <label className="field">
             <span>Nom du fichier (facultatif)</span>
             <input value={fileName} onChange={(e) => setFileName(e.target.value)} placeholder="Déduit automatiquement" />
+          </label>
+        )}
+        {videoUrls.length > 0 && (
+          <label className="field">
+            <span>Qualité vidéo</span>
+            <QualitySelect load={singleVideo ? load : null} value={quality} onChange={setQuality} />
           </label>
         )}
         <div className="field">
@@ -238,6 +276,18 @@ export function SettingsDialog({
         <label className="check">
           <input type="checkbox" checked={s.sortByCategory} onChange={(e) => setS({ ...s, sortByCategory: e.target.checked })} />
           Ranger dans des sous-dossiers par catégorie (Vidéos, Musique, Documents…)
+        </label>
+        <label className="field">
+          <span>Qualité des vidéos</span>
+          <select value={s.videoQuality} onChange={(e) => setS({ ...s, videoQuality: e.target.value })}>
+            <option value="ask">Demander à chaque fois</option>
+            <option value="best">Toujours la meilleure</option>
+            {[2160, 1440, 1080, 720, 480, 360].map((h) => (
+              <option key={h} value={String(h)}>
+                {h}p au plus
+              </option>
+            ))}
+          </select>
         </label>
         <div className="grid2">
           <label className="field">
@@ -375,6 +425,57 @@ export function ConfirmClear({
           Vider
         </button>
       </div>
+    </Modal>
+  );
+}
+
+/** Choix de la qualité d'une vidéo reçue (réglage « Demander à chaque fois »). */
+export function QualityDialog({
+  id,
+  name,
+  onClose,
+}: {
+  id: string;
+  name: string;
+  onClose: () => void;
+}) {
+  const [quality, setQuality] = useState("best");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const load = useMemo(() => () => api.probeQualitiesFor(id), [id]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await api.setQuality(id, quality);
+      onClose();
+    } catch (err) {
+      setError(String(err));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Choisir la qualité" onClose={onClose}>
+      <form onSubmit={submit} className="form">
+        <p className="ellipsis" title={name}>
+          {name}
+        </p>
+        <label className="field">
+          <span>Qualité vidéo</span>
+          <QualitySelect load={load} value={quality} onChange={setQuality} />
+        </label>
+        {error && <p className="error">{error}</p>}
+        <div className="modal__actions">
+          <button type="button" className="btn" onClick={onClose}>
+            Plus tard
+          </button>
+          <button type="submit" className="btn btn--primary" disabled={busy}>
+            Télécharger
+          </button>
+        </div>
+      </form>
     </Modal>
   );
 }

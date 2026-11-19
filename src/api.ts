@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AddRequest, DownloadView, Settings } from "./types";
+import type { AddRequest, DownloadView, QualityOption, Settings } from "./types";
 
 export const api = {
   list: () => invoke<DownloadView[]>("list_downloads"),
@@ -14,4 +14,8 @@ export const api = {
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   open: (id: string) => invoke<void>("open_download", { id }),
   reveal: (id: string) => invoke<void>("reveal_download", { id }),
+  setQuality: (id: string, quality: string) => invoke<void>("set_quality", { id, quality }),
+  isVideoUrl: (url: string) => invoke<boolean>("is_video_url", { url }),
+  probeQualities: (url: string, referer?: string | null) => invoke<QualityOption[]>("probe_qualities", { url, referer: referer || null }),
+  probeQualitiesFor: (id: string) => invoke<QualityOption[]>("probe_qualities_for", { id }),
 };

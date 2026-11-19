@@ -38,6 +38,15 @@ export interface DownloadView {
   scheduledAt: number | null;
   completedAt: number | null;
   error: string | null;
+  /** Hauteur d'image maximale choisie (720 = 720p) ; null = la meilleure. */
+  maxHeight: number | null;
+  /** Vidéo en attente du choix de qualité. */
+  qualityPending: boolean;
+}
+
+export interface QualityOption {
+  height: number;
+  size: number | null;
 }
 
 export interface RequestHeaders {
@@ -54,6 +63,8 @@ export interface AddRequest {
   scheduledAt?: number | null;
   startPaused?: boolean;
   kind?: Kind | null;
+  /** « best » ou une hauteur (« 720 ») ; absent : selon les réglages. */
+  quality?: string | null;
 }
 
 export interface Settings {
@@ -64,4 +75,6 @@ export interface Settings {
   sortByCategory: boolean;
   extensionToken: string;
   serverPort: number;
+  /** « ask », « best » ou une hauteur maximale (« 1080 »). */
+  videoQuality: string;
 }

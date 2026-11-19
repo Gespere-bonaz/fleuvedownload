@@ -60,6 +60,85 @@ pub fn is_video_site(url: &str) -> bool {
     }
 }
 
+/// Sélecteur de format yt-dlp. Avec `max_height`, on prend le meilleur format
+/// qui ne dépasse pas cette hauteur ; à défaut, le meilleur disponible.
+pub fn format_selector(max_height: Option<u32>, merge: bool) -> String {
+    let h = max_height.map(|h| format!("[height<={h}]")).unwrap_or_default();
+    let mut f = if merge {
+        format!("bv*{h}[vcodec^=avc1]+ba[acodec^=mp4a]/bv*{h}+ba/b{h}")
+    } else {
+        format!("b{h}")
+    };
+    if max_height.is_some() {
+        f.push_str(if merge { "/bv*+ba/b" } else { "/b" });
+    }
+    f
+}
+
+/// Qualités proposées par le site (via `yt-dlp -J`), de la meilleure à la plus basse.
+pub(crate) async fn probe_qualities(url: &str, headers: &crate::model::RequestHeaders) -> Result<Vec<crate::model::QualityOption>> {
+    let ytdlp = find_tool("yt-dlp").ok_or_else(|| anyhow!(Fatal(format!("yt-dlp est introuvable. Installez-le {INSTALL_HINT}"))))?;
+    let cookie = headers.cookie.clone().filter(|c| !c.trim().is_empty());
+    let ua = headers.user_agent.as_deref();
+    let msg = match probe_once(&ytdlp, url, ua, None).await? {
+        Ok(q) => return Ok(q),
+        Err(msg) => msg,
+    };
+    // Comme au téléchargement : on réessaie avec la session du navigateur si le site l'exige.
+    let Some(cookie) = cookie.filter(|_| needs_login(&msg)) else {
+        bail!(explain(&msg));
+    };
+    let jar = write_cookie_jar(url, &cookie)?;
+    let second = probe_once(&ytdlp, url, ua, Some(&jar)).await;
+    let _ = std::fs::remove_file(&jar);
+    match second? {
+        Ok(q) => Ok(q),
+        Err(msg) => bail!(explain(&msg)),
+    }
+}
+
+async fn probe_once(
+    ytdlp: &Path,
+    url: &str,
+    user_agent: Option<&str>,
+    cookie_jar: Option<&Path>,
+) -> Result<std::result::Result<Vec<crate::model::QualityOption>, String>> {
+    let mut cmd = Command::new(ytdlp);
+    cmd.args(["-J", "--no-playlist", "--no-warnings", "--no-colors"]);
+    if let Some(jar) = cookie_jar {
+        cmd.arg("--cookies").arg(jar);
+    }
+    if let Some(ua) = user_agent.filter(|u| !u.is_empty()) {
+        cmd.args(["--user-agent", ua]);
+    }
+    cmd.arg("--").arg(url).stdin(Stdio::null()).kill_on_drop(true);
+    let out = tokio::time::timeout(std::time::Duration::from_secs(45), cmd.output())
+        .await
+        .map_err(|_| anyhow!("le site met trop de temps à répondre"))??;
+    if !out.status.success() {
+        return Ok(Err(String::from_utf8_lossy(&out.stderr).into_owned()));
+    }
+    let info: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    Ok(Ok(qualities_from_info(&info)))
+}
+
+/// Extrait les hauteurs d'image distinctes de la réponse `yt-dlp -J`, avec une
+/// taille estimée (image + meilleur son quand ils sont séparés).
+pub fn qualities_from_info(info: &serde_json::Value) -> Vec<crate::model::QualityOption> {
+    let formats = info["formats"].as_array().cloned().unwrap_or_default();
+    let size = |f: &serde_json::Value| f["filesize"].as_u64().or_else(|| f["filesize_approx"].as_u64());
+    let no = |f: &serde_json::Value, k: &str| f[k].as_str() == Some("none");
+    let audio = formats.iter().filter(|f| no(f, "vcodec") && !no(f, "acodec")).filter_map(size).max().unwrap_or(0);
+    let mut best: std::collections::BTreeMap<u32, Option<u64>> = Default::default();
+    for f in formats.iter().filter(|f| !no(f, "vcodec")) {
+        let Some(h) = f["height"].as_u64().map(|h| h as u32).filter(|h| *h > 0) else { continue };
+        let s = size(f).map(|s| if no(f, "acodec") { s + audio } else { s });
+        let e = best.entry(h).or_insert(None);
+        *e = (*e).max(s);
+    }
+    best.into_iter().rev().map(|(height, size)| crate::model::QualityOption { height, size }).collect()
+}
+
 /// Ligne de progression émise par yt-dlp grâce à `--progress-template`.
 const MARK: &str = "FLEUVE:";
 
@@ -185,9 +264,9 @@ async fn attempt(
     ffmpeg: Option<&Path>,
     cookie_jar: Option<&Path>,
 ) -> Result<std::result::Result<(), String>> {
-    let (url, dir, user_agent) = {
+    let (url, dir, user_agent, max_height) = {
         let r = item.rec.lock().unwrap();
-        (r.url.clone(), r.dest_dir.clone(), r.headers.user_agent.clone())
+        (r.url.clone(), r.dest_dir.clone(), r.headers.user_agent.clone(), r.max_height)
     };
     std::fs::create_dir_all(&dir)?;
     let connections = inner.settings().connections.clamp(1, 16);
@@ -221,11 +300,11 @@ async fn attempt(
     if let Some(ff) = ffmpeg {
         // Meilleure image + meilleur son, assemblés en MP4 (lisible partout sur Mac).
         cmd.args(["--ffmpeg-location", &ff.to_string_lossy()])
-            .args(["-f", "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b"])
+            .args(["-f", &format_selector(max_height, true)])
             .args(["--merge-output-format", "mp4"]);
     } else {
         // Sans ffmpeg : un seul fichier déjà assemblé (qualité plus basse).
-        cmd.args(["-f", "b"]);
+        cmd.args(["-f", &format_selector(max_height, false)]);
     }
     if limit > 0 {
         cmd.args(["--limit-rate", &format!("{limit}K")]);
@@ -374,6 +453,34 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn format_selectors() {
+        assert_eq!(format_selector(None, true), "bv*[vcodec^=avc1]+ba[acodec^=mp4a]/bv*+ba/b");
+        assert_eq!(format_selector(None, false), "b");
+        assert_eq!(
+            format_selector(Some(720), true),
+            "bv*[height<=720][vcodec^=avc1]+ba[acodec^=mp4a]/bv*[height<=720]+ba/b[height<=720]/bv*+ba/b"
+        );
+        assert_eq!(format_selector(Some(480), false), "b[height<=480]/b");
+    }
+
+    #[test]
+    fn qualities_from_formats() {
+        let info = serde_json::json!({"formats": [
+            {"vcodec": "none", "acodec": "mp4a", "filesize": 3_000_000},
+            {"vcodec": "avc1", "acodec": "none", "height": 1080, "filesize": 50_000_000},
+            {"vcodec": "vp9", "acodec": "none", "height": 1080, "filesize_approx": 40_000_000},
+            {"vcodec": "avc1", "acodec": "none", "height": 720, "filesize": 20_000_000},
+            {"vcodec": "avc1", "acodec": "mp4a", "height": 360},
+            {"vcodec": "none", "acodec": "none", "height": 90}
+        ]});
+        let q = qualities_from_info(&info);
+        let heights: Vec<u32> = q.iter().map(|o| o.height).collect();
+        assert_eq!(heights, vec![1080, 720, 360]);
+        assert_eq!(q[0].size, Some(53_000_000));
+        assert_eq!(q[2].size, None);
+    }
 
     #[test]
     fn video_sites() {

@@ -116,7 +116,9 @@ async fn add(
     };
     match state.manager.add(req) {
         Ok(id) => {
-            (state.on_added)(id.clone(), body.focus);
+            // Une vidéo qui attend le choix de qualité affiche toujours Fleuve.
+            let pending = state.manager.list().iter().any(|d| d.id == id && d.quality_pending);
+            (state.on_added)(id.clone(), body.focus || pending);
             (StatusCode::OK, Json(json!({"ok": true, "id": id})))
         }
         Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": e.to_string()}))),

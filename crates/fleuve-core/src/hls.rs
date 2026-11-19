@@ -25,7 +25,23 @@ use url::Url;
 #[derive(Debug, PartialEq)]
 pub struct Variant {
     pub bandwidth: u64,
+    /// Hauteur d'image tirée de RESOLUTION (720 pour 1280x720), si indiquée.
+    pub height: Option<u32>,
     pub url: Url,
+}
+
+/// Choisit la variante : le meilleur débit parmi celles qui ne dépassent pas
+/// `max_height` ; si aucune ne convient, la plus basse résolution connue.
+pub fn pick_variant(variants: &[Variant], max_height: Option<u32>) -> Option<&Variant> {
+    let Some(max) = max_height else {
+        return variants.iter().max_by_key(|v| v.bandwidth);
+    };
+    variants
+        .iter()
+        .filter(|v| v.height.map_or(false, |h| h <= max))
+        .max_by_key(|v| (v.height, v.bandwidth))
+        .or_else(|| variants.iter().filter(|v| v.height.is_some()).min_by_key(|v| (v.height, v.bandwidth)))
+        .or_else(|| variants.iter().max_by_key(|v| v.bandwidth))
 }
 
 #[derive(Debug, PartialEq)]
@@ -73,7 +89,7 @@ pub fn parse_playlist(text: &str, base: &Url) -> Result<Playlist> {
         bail!(Fatal("ce n'est pas une liste de lecture HLS".into()));
     }
     let mut variants = Vec::new();
-    let mut pending_bw: Option<u64> = None;
+    let mut pending_bw: Option<(u64, Option<u32>)> = None;
     let mut media = Media { init: None, segments: vec![], encrypted: false, ended: false, byte_ranges: false };
     for raw in text.lines() {
         let line = raw.trim();
@@ -82,12 +98,12 @@ pub fn parse_playlist(text: &str, base: &Url) -> Result<Playlist> {
         }
         if let Some(tag) = line.strip_prefix('#') {
             if tag.starts_with("EXT-X-STREAM-INF") {
-                pending_bw = Some(
-                    attr(line, "AVERAGE-BANDWIDTH")
-                        .or_else(|| attr(line, "BANDWIDTH"))
-                        .and_then(|b| b.parse().ok())
-                        .unwrap_or(0),
-                );
+                let bw = attr(line, "AVERAGE-BANDWIDTH")
+                    .or_else(|| attr(line, "BANDWIDTH"))
+                    .and_then(|b| b.parse().ok())
+                    .unwrap_or(0);
+                let height = attr(line, "RESOLUTION").and_then(|r| r.split_once(['x', 'X'])).and_then(|(_, h)| h.parse().ok());
+                pending_bw = Some((bw, height));
             } else if tag.starts_with("EXT-X-KEY") {
                 let method = attr(line, "METHOD").unwrap_or("NONE");
                 if !method.eq_ignore_ascii_case("NONE") {
@@ -105,8 +121,8 @@ pub fn parse_playlist(text: &str, base: &Url) -> Result<Playlist> {
             continue;
         }
         let url = base.join(line).with_context(|| format!("adresse invalide : {line}"))?;
-        if let Some(bw) = pending_bw.take() {
-            variants.push(Variant { bandwidth: bw, url });
+        if let Some((bw, height)) = pending_bw.take() {
+            variants.push(Variant { bandwidth: bw, height, url });
         } else {
             media.segments.push(url);
         }
@@ -130,18 +146,30 @@ async fn fetch_text(inner: &Inner, url: &Url, headers: &HeaderMap) -> Result<Str
     Ok(resp.text().await?)
 }
 
-/// Lit la liste maître si besoin et renvoie la liste des morceaux de la meilleure qualité.
-async fn resolve_media(inner: &Inner, url: &Url, headers: &HeaderMap) -> Result<Media> {
+/// Qualités proposées par une liste maître HLS (vide si une seule qualité).
+pub(crate) async fn probe_qualities(inner: &Inner, url: &str, headers: &RequestHeaders) -> Result<Vec<QualityOption>> {
+    let url = Url::parse(url)?;
+    let text = fetch_text(inner, &url, &request_headers(headers)).await?;
+    let Playlist::Master(variants) = parse_playlist(&text, &url)? else {
+        return Ok(vec![]);
+    };
+    let mut heights: Vec<u32> = variants.iter().filter_map(|v| v.height).collect();
+    heights.sort_unstable_by(|a, b| b.cmp(a));
+    heights.dedup();
+    Ok(heights.into_iter().map(|height| QualityOption { height, size: None }).collect())
+}
+
+/// Lit la liste maître si besoin et renvoie la liste des morceaux de la qualité choisie
+/// (la meilleure sans limite, sinon la meilleure sous `max_height`).
+async fn resolve_media(inner: &Inner, url: &Url, headers: &HeaderMap, max_height: Option<u32>) -> Result<Media> {
     let mut current = url.clone();
     for _ in 0..3 {
         let text = fetch_text(inner, &current, headers).await?;
         match parse_playlist(&text, &current)? {
             Playlist::Media(m) => return Ok(m),
             Playlist::Master(vs) => {
-                current = vs
-                    .into_iter()
-                    .max_by_key(|v| v.bandwidth)
-                    .map(|v| v.url)
+                current = pick_variant(&vs, max_height)
+                    .map(|v| v.url.clone())
                     .ok_or_else(|| anyhow!("liste maître vide"))?;
             }
         }
@@ -150,11 +178,11 @@ async fn resolve_media(inner: &Inner, url: &Url, headers: &HeaderMap) -> Result<
 }
 
 pub(crate) async fn run_hls(inner: &Arc<Inner>, item: &Arc<Item>, token: &CancellationToken) -> Result<()> {
-    let (url, headers) = {
+    let (url, headers, max_height) = {
         let r = item.rec.lock().unwrap();
-        (Url::parse(&r.url)?, request_headers(&r.headers))
+        (Url::parse(&r.url)?, request_headers(&r.headers), r.max_height)
     };
-    let media = cancellable(token, resolve_media(inner, &url, &headers)).await??;
+    let media = cancellable(token, resolve_media(inner, &url, &headers, max_height)).await??;
     if media.encrypted {
         bail!(Fatal(
             "flux chiffré : Fleuve ne télécharge que les flux HLS non protégés".into()
@@ -359,6 +387,19 @@ mod tests {
             }
             _ => panic!("liste média attendue"),
         }
+    }
+
+    #[test]
+    fn picks_variant_by_quality() {
+        let base = Url::parse("https://cdn.example.org/v/master.m3u8").unwrap();
+        let master = "#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000,RESOLUTION=640x360\nlow.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=2400000,RESOLUTION=1280x720\nmid.m3u8\n#EXT-X-STREAM-INF:BANDWIDTH=6000000,RESOLUTION=1920x1080\nhigh.m3u8\n";
+        let Playlist::Master(v) = parse_playlist(master, &base).unwrap() else { panic!("liste maître attendue") };
+        assert_eq!(v[2].height, Some(1080));
+        let name = |h| pick_variant(&v, h).unwrap().url.path().rsplit('/').next().unwrap().to_string();
+        assert_eq!(name(None), "high.m3u8");
+        assert_eq!(name(Some(720)), "mid.m3u8");
+        assert_eq!(name(Some(1000)), "mid.m3u8");
+        assert_eq!(name(Some(240)), "low.m3u8"); // rien en dessous : la plus basse
     }
 
     #[test]
