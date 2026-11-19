@@ -249,9 +249,7 @@ async fn run_file(inner: &Arc<Inner>, item: &Arc<Item>, token: &CancellationToke
             ));
         }
         if crate::site::find_tool("yt-dlp").is_none() {
-            bail!(Fatal(
-                "pour les vidéos de sites, installez yt-dlp dans le Terminal : brew install yt-dlp ffmpeg".into()
-            ));
+            bail!(Fatal(format!("pour les vidéos de sites, installez yt-dlp {}", crate::site::INSTALL_HINT)));
         }
         {
             let mut r = item.rec.lock().unwrap();

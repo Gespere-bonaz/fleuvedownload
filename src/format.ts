@@ -2,6 +2,11 @@ import type { Status } from "./types";
 
 const UNITS = ["o", "Ko", "Mo", "Go", "To"];
 
+/** Vrai sur macOS : raccourcis avec ⌘ et « Finder » ; ailleurs Ctrl et gestionnaire de fichiers. */
+export const IS_MAC = /Mac/i.test(navigator.userAgent);
+/** Libellé de la touche de raccourci : « ⌘ » sur Mac, « Ctrl+ » ailleurs. */
+export const MOD_KEY = IS_MAC ? "⌘" : "Ctrl+";
+
 /** Taille lisible, en unités binaires comme le Finder affiche en français. */
 export function formatBytes(n: number | null | undefined): string {
   if (n == null) return "—";

@@ -40,6 +40,21 @@ rustup target add x86_64-apple-darwin aarch64-apple-darwin
 npm run tauri build -- --target universal-apple-darwin
 ```
 
+## Linux (Debian, Ubuntu)
+
+Fleuve se construit aussi sous Linux (testé sur Debian 12) :
+
+```bash
+sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev build-essential libssl-dev
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+npm install
+npm run tauri build -- --bundles deb
+sudo apt install ./target/release/bundle/deb/Fleuve_0.1.0_amd64.deb
+```
+
+Pour les vidéos de sites : `pipx install yt-dlp` (ou `pip install --user yt-dlp`) et `sudo apt install ffmpeg`.
+Données de l'app : `~/.local/share/com.gesperebonazebi.fleuve/`.
+
 ## Installer l'extension (Chrome, Edge, Brave, Arc)
 
 1. Ouvrez `chrome://extensions` et activez le **Mode développeur**.
