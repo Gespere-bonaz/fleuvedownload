@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type { AddRequest, DownloadView, Settings } from "./types";
-import { CATEGORIES, IS_MAC, MOD_KEY, CATEGORY_COLOR, STATUS_LABEL, extensionOf, formatBytes, formatDate, formatEta, formatSpeed } from "./format";
+import { CATEGORIES, IS_LINUX, IS_MAC, MOD_KEY, CATEGORY_COLOR, STATUS_LABEL, extensionOf, formatBytes, formatDate, formatEta, formatSpeed } from "./format";
 import { SegmentBar } from "./components/SegmentBar";
+import { WindowControls } from "./components/WindowControls";
 import { AddDialog, ConfirmClear, ConfirmRemove, ScheduleDialog, SettingsDialog } from "./components/Dialogs";
 
 type Filter =
@@ -205,6 +206,7 @@ export default function App() {
           <button className="btn btn--icon" title="Réglages" onClick={() => setDialog({ kind: "settings" })} aria-label="Réglages">
             ⚙
           </button>
+          {IS_LINUX && <WindowControls />}
         </header>
 
         <section className="list" onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
