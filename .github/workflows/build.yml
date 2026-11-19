@@ -55,7 +55,14 @@ jobs:
       - run: npm ci
 
       - name: Engine tests
-        run: cargo test -p fleuve-core
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p fleuve-core 2>&1 | tee test.log || {
+            # Remonte les échecs en annotations, visibles sur la page du run.
+            grep -E "panicked|FAILED|^failures:|^    [a-z_:]+$|Error|error" test.log | head -25 | sed 's/^/::error title=Engine tests::/'
+            exit 1
+          }
 
       - name: Build app
         uses: tauri-apps/tauri-action@v0
