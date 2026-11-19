@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <link rel="stylesheet" href="ui.css" />
+  <style>
+    body { width: 360px; padding: 12px 14px; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .toggle { display: flex; align-items: center; gap: 8px; margin: 8px 0 12px; }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+    ul { list-style: none; margin: 0; padding: 0; max-height: 260px; overflow: auto; }
+    li { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-top: 1px solid var(--line); }
+    li .info { flex: 1; min-width: 0; }
+    li .url { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12px; }
+    .tag { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px; color: #fff; background: #7c4dff; margin-right: 6px; }
+    .tag.file { background: #2f7de1; }
+    footer { margin-top: 12px; display: flex; justify-content: space-between; }
+    #msg { min-height: 16px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1><img src="icons/icon32.png" alt="" /> Fleuve</h1>
+    <span id="status" class="status"><i></i><span>Vérification…</span></span>
+  </header>
+
+  <label class="toggle"><input type="checkbox" id="intercept" /> Intercepter les téléchargements du navigateur</label>
+
+  <div class="row">
+    <input type="url" id="link" placeholder="Coller un lien…" />
+    <button class="primary" id="send">Envoyer</button>
+  </div>
+  <div id="msg" class="muted"></div>
+
+  <h2>Médias détectés dans cet onglet</h2>
+  <ul id="media"></ul>
+  <p id="empty" class="muted">Lancez la lecture de la vidéo : elle apparaîtra ici.</p>
+
+  <footer>
+    <button id="options">Options</button>
+    <span class="muted">Flux protégés (DRM) non pris en charge</span>
+  </footer>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

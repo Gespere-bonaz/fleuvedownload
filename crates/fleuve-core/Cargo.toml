@@ -1,0 +1,21 @@
+[package]
+name = "fleuve-core"
+version = "0.1.0"
+edition = "2021"
+description = "Moteur de téléchargement de Fleuve : segmentation dynamique, reprise, HLS, file d'attente"
+
+[dependencies]
+anyhow = "1"
+axum = "0.8"
+futures-util = "0.3"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "http2"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+url = "2"
+percent-encoding = "2"
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tempfile = "3"
