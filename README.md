@@ -1,69 +1,120 @@
 # Fleuve
 
-Gestionnaire de téléchargements pour macOS, inspiré du fonctionnement d'Internet Download Manager (IDM).
-Projet personnel de Gespère BONAZEBI — ingénierie inverse **fonctionnelle** : aucun code ni fichier d'IDM n'est réutilisé.
+**A fast, multi-connection download manager for macOS, Linux and Windows**, inspired by how Internet Download Manager (IDM) works.
+Personal project by Gespère BONAZEBI — a **functional** reverse-engineering: no IDM code or files are reused.
 
-## Ce que fait Fleuve
+![Fleuve on Linux](docs/screenshot.png)
 
-- **Accélération multi-connexions** : jusqu'à 32 connexions par fichier, avec la segmentation dynamique d'IDM (chaque connexion libre reprend la moitié du plus grand segment restant).
-- **Reprise** : état sauvegardé toutes les 2 secondes ; reprise après pause, coupure réseau ou redémarrage du Mac.
-- **Lien avec le navigateur** : extension Chrome (aussi Edge, Brave, Arc) qui intercepte les téléchargements, ajoute « Télécharger avec Fleuve » au clic droit et détecte les vidéos et sons de la page.
-- **Capture vidéo HLS** (.m3u8) : meilleure qualité choisie automatiquement, morceaux téléchargés en parallèle puis assemblés.
-- **File d'attente, planificateur, limite de débit**, classement automatique par catégorie.
+<details>
+<summary>Dark mode</summary>
 
-Fleuve ne contourne aucune protection : les flux chiffrés ou sous DRM sont refusés.
+![Fleuve on Linux, dark mode](docs/screenshot-dark.png)
 
-## Prérequis sur le Mac
+</details>
+
+## Features
+
+- **Multi-connection acceleration**: up to 32 connections per file, with IDM-style dynamic segmentation (every free connection takes over half of the largest remaining segment).
+- **Resume anywhere**: state is saved every 2 seconds; downloads resume after a pause, a network drop or a reboot.
+- **Browser integration**: a Chrome extension (also Edge, Brave, Arc) that intercepts downloads, adds "Download with Fleuve" to the right-click menu and detects the videos and audio on the page.
+- **HLS video capture** (.m3u8): the best quality is picked automatically, chunks are downloaded in parallel and then merged.
+- **Site videos** (YouTube, Vimeo, …) through [yt-dlp](https://github.com/yt-dlp/yt-dlp) when it is installed.
+- **Queue, scheduler, speed limit**, and automatic sorting by category.
+- **Native look on each system**: macOS style on the Mac; on Linux, a clean GNOME-inspired theme with an integrated header bar and rounded window corners. Light and dark mode follow the system.
+
+Fleuve never bypasses any protection: encrypted or DRM-protected streams are refused.
+
+## Download
+
+Ready-made builds for **macOS** (universal: Apple Silicon + Intel), **Windows** and **Linux** (`.deb`, `.rpm`, `.AppImage`) are produced by GitHub Actions:
+
+- on each push, in the **Actions** tab → latest *Build* run → *Artifacts*;
+- for each version tag (`v*`), as a draft **Release**.
+
+The apps are not signed:
+- **macOS**: on first launch, right-click `Fleuve.app` → **Open**.
+- **Windows**: in the SmartScreen warning, click **More info → Run anyway**.
+
+## Build from source
+
+### Requirements
+
+| System | Command |
+| --- | --- |
+| macOS | `xcode-select --install` and `brew install node` |
+| Debian / Ubuntu | `sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev build-essential libssl-dev` |
+| Windows | [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and Node.js 20+ (WebView2 ships with Windows 10/11) |
+
+Then install Rust on every system:
 
 ```bash
-xcode-select --install                                   # outils de compilation Apple
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh   # Rust
-brew install node                                        # Node.js 20 ou plus
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
-## Lancer et construire
+### Run and build
 
 ```bash
-cd fleuve
 npm install
-npm run tauri dev      # mode développement, rechargement à chaud
-npm run tauri build    # application finale
+npm run tauri dev      # development mode, hot reload
+npm run tauri build    # final application
 ```
 
-L'application est créée dans `target/release/bundle/macos/Fleuve.app` et l'installeur dans `target/release/bundle/dmg/`.
-Glissez `Fleuve.app` dans **Applications**. Comme l'app n'est pas signée par Apple, au premier lancement faites clic droit → **Ouvrir**.
+Output, under `target/release/bundle/`:
 
-Pour un binaire universel (Apple Silicon + Intel) :
+| System | Files |
+| --- | --- |
+| macOS | `macos/Fleuve.app`, `dmg/` installer — drag `Fleuve.app` into **Applications** |
+| Linux | `deb/`, `rpm/`, `appimage/` — e.g. `sudo apt install ./target/release/bundle/deb/Fleuve_0.1.0_amd64.deb` |
+| Windows | `msi/` and `nsis/` installers |
+
+Universal macOS binary (Apple Silicon + Intel):
 
 ```bash
 rustup target add x86_64-apple-darwin aarch64-apple-darwin
 npm run tauri build -- --target universal-apple-darwin
 ```
 
-## Installer l'extension (Chrome, Edge, Brave, Arc)
+### Site videos (optional)
 
-1. Ouvrez `chrome://extensions` et activez le **Mode développeur**.
-2. Cliquez sur **Charger l'extension non empaquetée** et choisissez le dossier `extension/`.
-3. Dans Fleuve : **Réglages → Jeton de l'extension → Copier**.
-4. Dans les options de l'extension : collez le jeton, puis **Tester la connexion**.
+| System | Command |
+| --- | --- |
+| macOS | `brew install yt-dlp ffmpeg` |
+| Linux | `pipx install yt-dlp` (or `pip install --user yt-dlp`) and `sudo apt install ffmpeg` |
+| Windows | `winget install yt-dlp.yt-dlp Gyan.FFmpeg` |
 
-Le lien passe par `127.0.0.1:47821`, uniquement en local, protégé par le jeton.
-Si Fleuve est fermé, le navigateur télécharge normalement.
+## Browser extension (Chrome, Edge, Brave, Arc)
+
+1. Open `chrome://extensions` and turn on **Developer mode**.
+2. Click **Load unpacked** and pick the `extension/` folder.
+3. In Fleuve: **Settings → Extension token → Copy**.
+4. In the extension options: paste the token, then **Test connection**.
+
+The link goes through `127.0.0.1:47821`, local only, protected by the token.
+If Fleuve is closed, the browser downloads normally.
 
 ## Tests
 
 ```bash
-cargo test -p fleuve-core          # 16 tests : segmentation, reprise, HLS, file, limite, sécurité du lien
-cargo run -p fleuve-core --example sans_interface -- ./donnees ./telechargements
+cargo test -p fleuve-core          # 21 tests: segmentation, resume, HLS, queue, speed limit, link security
+cargo run -p fleuve-core --example sans_interface -- ./data ./downloads
 ```
 
-## Organisation du code
+## Project layout
 
-| Dossier | Rôle |
+| Folder | Role |
 | --- | --- |
-| `crates/fleuve-core/` | Moteur en Rust : `engine.rs` (segments), `hls.rs`, `manager.rs` (file, planificateur, sauvegarde), `limiter.rs`, `server.rs` (lien navigateur) |
-| `src-tauri/` | Application Tauri : commandes appelées par l'interface |
-| `src/` | Interface React + TypeScript |
-| `extension/` | Extension navigateur (Manifest V3) |
+| `crates/fleuve-core/` | Rust engine: `engine.rs` (segments), `hls.rs`, `site.rs` (yt-dlp), `manager.rs` (queue, scheduler, persistence), `limiter.rs`, `server.rs` (browser link) |
+| `src-tauri/` | Tauri app: commands called by the UI; `tauri.linux.conf.json` holds the Linux window settings |
+| `src/` | React + TypeScript UI |
+| `extension/` | Browser extension (Manifest V3) |
+| `.github/workflows/` | macOS, Windows and Linux builds |
 
-Données de l'app : `~/Library/Application Support/com.gesperebonazebi.fleuve/` (`downloads.json`, `settings.json`).
+## App data
+
+| System | Folder |
+| --- | --- |
+| macOS | `~/Library/Application Support/com.gesperebonazebi.fleuve/` |
+| Linux | `~/.local/share/com.gesperebonazebi.fleuve/` |
+| Windows | `%APPDATA%\com.gesperebonazebi.fleuve\` |
+
+It contains `downloads.json` and `settings.json`.

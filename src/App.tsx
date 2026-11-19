@@ -2,8 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
 import type { AddRequest, DownloadView, Settings } from "./types";
-import { CATEGORIES, CATEGORY_COLOR, STATUS_LABEL, extensionOf, formatBytes, formatDate, formatEta, formatSpeed } from "./format";
+import { CATEGORIES, IS_LINUX, IS_MAC, MOD_KEY, CATEGORY_COLOR, STATUS_LABEL, extensionOf, formatBytes, formatDate, formatEta, formatSpeed } from "./format";
 import { SegmentBar } from "./components/SegmentBar";
+import { WindowControls } from "./components/WindowControls";
 import { AddDialog, ConfirmClear, ConfirmRemove, ScheduleDialog, SettingsDialog } from "./components/Dialogs";
 
 type Filter =
@@ -79,11 +80,11 @@ export default function App() {
     return () => un.forEach((p) => p.then((f) => f()));
   }, [notify]);
 
-  // ⌘N : ajouter ; coller un lien n'importe où ouvre la fenêtre d'ajout.
+  // ⌘N (Ctrl+N hors Mac) : ajouter ; coller un lien n'importe où ouvre la fenêtre d'ajout.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (dialog) return;
-      if (e.metaKey && e.key.toLowerCase() === "n") {
+      if ((IS_MAC ? e.metaKey : e.ctrlKey) && e.key.toLowerCase() === "n") {
         e.preventDefault();
         setDialog({ kind: "add", url: "" });
       }
@@ -165,7 +166,7 @@ export default function App() {
 
       <main className="main">
         <header className="toolbar" data-tauri-drag-region>
-          <button className="btn btn--primary" onClick={() => setDialog({ kind: "add", url: "" })} title="Ajouter (⌘N)">
+          <button className="btn btn--primary" onClick={() => setDialog({ kind: "add", url: "" })} title={`Ajouter (${MOD_KEY}N)`}>
             + Ajouter
           </button>
           <div className="toolbar__group">
@@ -196,8 +197,8 @@ export default function App() {
             <button className="btn" disabled={current?.status !== "completed"} onClick={() => current && run(api.open(current.id))}>
               Ouvrir
             </button>
-            <button className="btn btn--hide-narrow" disabled={!current} title="Afficher dans le Finder" onClick={() => current && run(api.reveal(current.id))}>
-              Finder
+            <button className="btn btn--hide-narrow" disabled={!current} title={IS_MAC ? "Afficher dans le Finder" : "Afficher dans le dossier"} onClick={() => current && run(api.reveal(current.id))}>
+              {IS_MAC ? "Finder" : "Dossier"}
             </button>
           </div>
           <div className="toolbar__spacer" data-tauri-drag-region />
@@ -205,6 +206,7 @@ export default function App() {
           <button className="btn btn--icon" title="Réglages" onClick={() => setDialog({ kind: "settings" })} aria-label="Réglages">
             ⚙
           </button>
+          {IS_LINUX && <WindowControls />}
         </header>
 
         <section className="list" onClick={(e) => e.target === e.currentTarget && setSelected(null)}>
@@ -213,7 +215,7 @@ export default function App() {
               <p className="empty__title">{items.length === 0 ? "Aucun téléchargement" : "Rien dans cette vue"}</p>
               {items.length === 0 && (
                 <p>
-                  Cliquez sur « Ajouter », collez un lien (⌘V) ou utilisez l'extension du navigateur.
+                  Cliquez sur « Ajouter », collez un lien ({MOD_KEY}V) ou utilisez l'extension du navigateur.
                 </p>
               )}
             </div>

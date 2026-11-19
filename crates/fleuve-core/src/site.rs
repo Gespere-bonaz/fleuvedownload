@@ -20,6 +20,15 @@ use tokio_util::sync::CancellationToken;
 /// n'hérite pas du PATH du terminal (Homebrew n'y figure pas).
 const SEARCH_DIRS: &[&str] = &["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
 
+/// Commande conseillée pour installer yt-dlp et ffmpeg selon le système.
+pub const INSTALL_HINT: &str = if cfg!(target_os = "macos") {
+    "dans le Terminal : brew install yt-dlp ffmpeg"
+} else if cfg!(target_os = "windows") {
+    "dans un terminal : winget install yt-dlp.yt-dlp Gyan.FFmpeg"
+} else {
+    "dans un terminal : pipx install yt-dlp (ou pip install --user yt-dlp), puis installez ffmpeg avec le gestionnaire de paquets"
+};
+
 pub fn find_tool(name: &str) -> Option<PathBuf> {
     let mut dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|p| std::env::split_paths(&p).collect())
@@ -56,9 +65,7 @@ const MARK: &str = "FLEUVE:";
 
 pub(crate) async fn run_site(inner: &Arc<Inner>, item: &Arc<Item>, token: &CancellationToken) -> Result<()> {
     let ytdlp = find_tool("yt-dlp").ok_or_else(|| {
-        anyhow!(Fatal(
-            "yt-dlp est introuvable. Installez-le dans le Terminal : brew install yt-dlp ffmpeg".into()
-        ))
+        anyhow!(Fatal(format!("yt-dlp est introuvable. Installez-le {INSTALL_HINT}")))
     })?;
     let ffmpeg = find_tool("ffmpeg");
     let (url, cookie) = {

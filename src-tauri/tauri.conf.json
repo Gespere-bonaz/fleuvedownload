@@ -28,7 +28,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
+    "targets": "all",
     "category": "Utility",
     "shortDescription": "Gestionnaire de téléchargements",
     "icon": [
