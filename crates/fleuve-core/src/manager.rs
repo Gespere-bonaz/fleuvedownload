@@ -98,6 +98,8 @@ impl Item {
             segments,
             hls_total_parts: r.hls_total_parts,
             hls_done_parts: r.hls_done.len() as u32,
+            max_height: r.max_height,
+            quality_pending: r.quality_pending,
             created_at: r.created_at,
             scheduled_at: r.scheduled_at,
             completed_at: r.completed_at,
@@ -377,7 +379,12 @@ impl Manager {
                 settings.download_dir.clone()
             }
         });
-        let status = if req.start_paused {
+        // Qualité : choix explicite, sinon réglage ; « ask » met la vidéo en attente.
+        let is_video = matches!(kind, Kind::Hls | Kind::Site);
+        let wanted = req.quality.clone().unwrap_or_else(|| settings.video_quality.clone());
+        let quality_pending = is_video && wanted == "ask";
+        let max_height = if is_video { crate::model::parse_quality(&wanted) } else { None };
+        let status = if req.start_paused || quality_pending {
             Status::Paused
         } else if req.scheduled_at.map_or(false, |t| t > util::now_secs()) {
             Status::Scheduled
@@ -407,6 +414,8 @@ impl Manager {
             scheduled_at: req.scheduled_at,
             completed_at: None,
             error: None,
+            max_height,
+            quality_pending,
         };
         let id = rec.id.clone();
         self.inner.items.lock().unwrap().push(Item::new(rec));
@@ -484,6 +493,7 @@ impl Manager {
             match r.status {
                 Status::Paused | Status::Failed | Status::Scheduled => {
                     r.status = Status::Queued;
+                    r.quality_pending = false;
                     r.scheduled_at = None;
                     r.error = None;
                 }
@@ -494,6 +504,52 @@ impl Manager {
         self.inner.mark_dirty();
         self.inner.wake.notify_one();
         Ok(())
+    }
+
+    /// Fixe la qualité d'une vidéo (« best » ou « 720 ») et la démarre si elle attendait ce choix.
+    pub fn set_quality(&self, id: &str, quality: &str) -> Result<()> {
+        let item = self.inner.find(id).ok_or_else(|| anyhow!("Téléchargement introuvable"))?;
+        {
+            let mut r = item.rec.lock().unwrap();
+            r.max_height = crate::model::parse_quality(quality);
+            if r.quality_pending {
+                r.quality_pending = false;
+                if r.status == Status::Paused {
+                    r.status = Status::Queued;
+                }
+            }
+        }
+        self.inner.save_state()?;
+        self.inner.mark_dirty();
+        self.inner.wake.notify_one();
+        Ok(())
+    }
+
+    /// Qualités disponibles pour une vidéo, de la meilleure à la plus basse.
+    /// Liste vide : une seule qualité, ou ce n'est pas une vidéo.
+    pub async fn probe_qualities(&self, url: &str, headers: &RequestHeaders) -> Result<Vec<crate::model::QualityOption>> {
+        if util::looks_like_hls(url) {
+            crate::hls::probe_qualities(&self.inner, url, headers).await
+        } else if crate::site::is_video_site(url) {
+            crate::site::probe_qualities(url, headers).await
+        } else {
+            Ok(vec![])
+        }
+    }
+
+    /// Qualités disponibles pour un téléchargement déjà ajouté.
+    pub async fn probe_qualities_for(&self, id: &str) -> Result<Vec<crate::model::QualityOption>> {
+        let (url, headers) = {
+            let item = self.inner.find(id).ok_or_else(|| anyhow!("Téléchargement introuvable"))?;
+            let r = item.rec.lock().unwrap();
+            (r.url.clone(), r.headers.clone())
+        };
+        self.probe_qualities(&url, &headers).await
+    }
+
+    /// Le lien mène-t-il à une vidéo (flux HLS ou site vidéo) ?
+    pub fn is_video_url(url: &str) -> bool {
+        util::looks_like_hls(url) || crate::site::is_video_site(url)
     }
 
     /// Programme (ou reprogramme) un téléchargement non terminé.
@@ -616,5 +672,7 @@ pub(crate) fn test_item(segments: Vec<Segment>) -> Arc<Item> {
         scheduled_at: None,
         completed_at: None,
         error: None,
+        max_height: None,
+        quality_pending: false,
     })
 }

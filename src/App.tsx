@@ -5,7 +5,8 @@ import type { AddRequest, DownloadView, Settings } from "./types";
 import { CATEGORIES, IS_LINUX, IS_MAC, MOD_KEY, CATEGORY_COLOR, STATUS_LABEL, extensionOf, formatBytes, formatDate, formatEta, formatSpeed } from "./format";
 import { SegmentBar } from "./components/SegmentBar";
 import { WindowControls } from "./components/WindowControls";
-import { AddDialog, ConfirmClear, ConfirmRemove, ScheduleDialog, SettingsDialog } from "./components/Dialogs";
+import { AddDialog, ConfirmClear, ConfirmRemove, QualityDialog, ScheduleDialog, SettingsDialog } from "./components/Dialogs";
+import { qualityLabel } from "./components/Quality";
 
 type Filter =
   | { kind: "all" }
@@ -50,7 +51,8 @@ type DialogState =
   | { kind: "settings" }
   | { kind: "schedule"; id: string }
   | { kind: "remove"; d: DownloadView }
-  | { kind: "clear" };
+  | { kind: "clear" }
+  | { kind: "quality"; id: string; name: string };
 
 export default function App() {
   const [items, setItems] = useState<DownloadView[]>([]);
@@ -72,8 +74,14 @@ export default function App() {
     const un = [
       listen<DownloadView[]>("downloads", (e) => setItems(e.payload)),
       listen<string>("added-from-browser", (e) => {
-        setSelected(e.payload);
+        const id = e.payload;
+        setSelected(id);
         notify("Téléchargement reçu du navigateur");
+        // Réglage « Demander à chaque fois » : la vidéo attend le choix de qualité.
+        api.list().then((ls) => {
+          const d = ls.find((x) => x.id === id);
+          if (d?.qualityPending) setDialog({ kind: "quality", id, name: d.fileName });
+        });
       }),
       listen<string>("server-error", (e) => notify(e.payload)),
     ];
@@ -266,7 +274,21 @@ export default function App() {
                     <td className="col-speed num">{formatSpeed(d.speed)}</td>
                     <td className="col-eta num">{formatEta(d.etaSecs)}</td>
                     <td className={`col-status st-${d.status}`}>
-                      {d.status === "scheduled" ? `Programmé ${formatDate(d.scheduledAt)}` : STATUS_LABEL[d.status]}
+                      {d.qualityPending ? (
+                        <button
+                          className="linkbtn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setDialog({ kind: "quality", id: d.id, name: d.fileName });
+                          }}
+                        >
+                          Choisir la qualité
+                        </button>
+                      ) : d.status === "scheduled" ? (
+                        `Programmé ${formatDate(d.scheduledAt)}`
+                      ) : (
+                        STATUS_LABEL[d.status]
+                      )}
                     </td>
                     <td className="col-act">
                       {stoppable(d) ? (
@@ -321,6 +343,14 @@ export default function App() {
                   ? `${current.hlsDoneParts} / ${current.hlsTotalParts || "?"} · ${current.connections} en parallèle`
                   : `${current.connections} actives · ${current.segments.length} segments`}
               </dd>
+              {(current.kind === "hls" || current.kind === "site") && (
+                <>
+                  <dt>Qualité</dt>
+                  <dd>
+                    {current.qualityPending ? "À choisir" : current.maxHeight ? `${qualityLabel(current.maxHeight)} au plus` : "Meilleure disponible"}
+                  </dd>
+                </>
+              )}
               <dt>Reprise</dt>
               <dd>{current.resumable ? "Possible" : current.status === "completed" ? "—" : "Impossible (le serveur refuse les plages)"}</dd>
               <dt>Dossier</dt>
@@ -341,6 +371,7 @@ export default function App() {
         <AddDialog
           initialUrl={dialog.url}
           defaultDir={settings.downloadDir}
+          defaultQuality={settings.videoQuality}
           onClose={() => setDialog(null)}
           onAdd={async (reqs: AddRequest[]) => {
             const ids = await api.add(reqs);
@@ -355,6 +386,7 @@ export default function App() {
           onSave={async (s) => setSettings(await api.saveSettings(s))}
         />
       )}
+      {dialog?.kind === "quality" && <QualityDialog id={dialog.id} name={dialog.name} onClose={() => setDialog(null)} />}
       {dialog?.kind === "schedule" && (
         <ScheduleDialog onClose={() => setDialog(null)} onSchedule={(at) => api.schedule(dialog.id, at)} />
       )}
