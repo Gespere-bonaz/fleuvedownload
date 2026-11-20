@@ -27,10 +27,9 @@ Fleuve never bypasses any protection: encrypted or DRM-protected streams are ref
 
 ## Download
 
-Ready-made builds for **macOS** (universal: Apple Silicon + Intel), **Windows** and **Linux** (`.deb`, `.rpm`, `.AppImage`) are produced by GitHub Actions:
+Ready-made installers for **Linux** (`.deb`, `.rpm`, `.AppImage`), **Windows** (`.msi`, `.exe`) and **macOS** (universal `.dmg`: Apple Silicon + Intel) are on the **[Releases](../../releases/latest)** page. Every push to `main` refreshes the files of the release matching the version in `src-tauri/tauri.conf.json`; change that version to start a new release.
 
-- in the **Actions** tab → latest run → *Artifacts*: *Build* (Linux, Windows) runs on every push; *Build macOS* runs on pushes to `main` and can be started by hand (**Run workflow**), since GitHub's Mac machines are sometimes all busy;
-- for each version tag (`v*`), as a draft **Release**.
+The macOS build runs in its own workflow (*Build macOS*), since GitHub's Mac machines are sometimes all busy: if its files are missing from the release, start it again from **Actions → Build macOS → Run workflow**. Each run's files are also kept under *Artifacts* in the **Actions** tab.
 
 The apps are not signed:
 - **macOS**: on first launch, right-click `Fleuve.app` → **Open**.
