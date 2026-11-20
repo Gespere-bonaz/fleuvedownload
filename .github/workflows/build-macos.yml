@@ -1,0 +1,84 @@
+name: Build macOS
+
+# Séparé du build principal : quand GitHub n'a pas de Mac libre, seul ce
+# workflow échoue. Relancez-le depuis l'onglet Actions (Run workflow).
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-latest
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+            args: --target universal-apple-darwin
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libayatana-appindicator3-dev libxdo-dev libssl-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+
+      - run: npm ci
+
+      - name: Engine tests
+        shell: bash
+        run: |
+          set -o pipefail
+          cargo test -p fleuve-core 2>&1 | tee test.log || {
+            # Remonte les échecs en annotations, visibles sur la page du run.
+            grep -E "panicked|FAILED|^failures:|^    [a-z_:]+$|Error|error" test.log | head -25 | sed 's/^/::error title=Engine tests::/'
+            exit 1
+          }
+
+      - name: Build app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }}
+          # Sur un tag v*, crée une release en brouillon avec les installeurs.
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: ${{ github.ref_type == 'tag' && format('Fleuve {0}', github.ref_name) || '' }}
+          releaseDraft: true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Fleuve-${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            target/release/bundle/dmg/*.dmg
+            target/universal-apple-darwin/release/bundle/dmg/*.dmg
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe

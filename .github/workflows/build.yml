@@ -1,5 +1,8 @@
 name: Build
 
+# Linux et Windows. macOS a son propre workflow (build-macos.yml) : les machines
+# Mac de GitHub sont parfois saturées et ne doivent pas bloquer ce build.
+
 on:
   push:
     branches: ["**"]
@@ -17,10 +20,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS (universal)
-            os: macos-latest
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-            args: --target universal-apple-darwin
           - name: Linux
             os: ubuntu-22.04
             rust-targets: ""
