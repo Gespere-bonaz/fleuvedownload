@@ -29,7 +29,7 @@ Fleuve never bypasses any protection: encrypted or DRM-protected streams are ref
 
 Ready-made builds for **macOS** (universal: Apple Silicon + Intel), **Windows** and **Linux** (`.deb`, `.rpm`, `.AppImage`) are produced by GitHub Actions:
 
-- on each push, in the **Actions** tab → latest *Build* run → *Artifacts*;
+- in the **Actions** tab → latest run → *Artifacts*: *Build* (Linux, Windows) runs on every push; *Build macOS* runs on pushes to `main` and can be started by hand (**Run workflow**), since GitHub's Mac machines are sometimes all busy;
 - for each version tag (`v*`), as a draft **Release**.
 
 The apps are not signed:
