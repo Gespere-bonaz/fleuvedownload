@@ -183,6 +183,21 @@ async fn segmented_download_is_exact() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn page_title_becomes_the_file_name() {
+    let (base, data) = start_server().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path()).await;
+    let id = m
+        .add(AddRequest { url: format!("{base}/file.bin"), title: Some("Mon épisode 1.5 : le début".into()), ..Default::default() })
+        .unwrap();
+    let st = wait_for(&m, &id, 30, |s| matches!(s, Status::Completed | Status::Failed)).await;
+    let v = m.get(&id).unwrap();
+    assert_eq!(st, Status::Completed, "{:?}", v.error);
+    assert_eq!(v.file_name, "Mon épisode 1.5 _ le début.bin");
+    assert_eq!(std::fs::read(tmp.path().join("dl").join(&v.file_name)).unwrap().len(), data.len());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn pause_resume_and_restart() {
     let (base, data) = start_server().await;
     let tmp = tempfile::tempdir().unwrap();
@@ -337,4 +352,90 @@ async fn extension_api_requires_token_and_extension_origin() {
     let r = c.get(format!("http://{addr}/ping")).header("x-fleuve-token", &token).send().await.unwrap();
     assert_eq!(r.status(), 200);
     assert_eq!(m.list().len(), 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn pairing_hands_the_token_only_after_the_user_agrees() {
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path()).await;
+    let token = m.settings().extension_token;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = fleuve_core::server::router(m.clone(), Arc::new(|_, _| {}));
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let c = reqwest::Client::new();
+    let start = format!("http://{addr}/pair/start");
+    let status = format!("http://{addr}/pair/status");
+    let ext = "chrome-extension://abcdef";
+
+    // Ni un programme sans « Origin », ni une page web ne peuvent demander l'appairage.
+    let r = c.post(&start).send().await.unwrap();
+    assert_eq!(r.status(), 403);
+    let r = c.post(&start).header("origin", "https://site-malveillant.example").send().await.unwrap();
+    assert_eq!(r.status(), 403);
+
+    // L'extension demande ; Fleuve présente la même demande, avec le même code.
+    let r = c.post(&start).header("origin", ext).send().await.unwrap();
+    assert_eq!(r.status(), 200);
+    let started = json_of(r).await;
+    let id = started["id"].as_str().unwrap().to_string();
+    let code = started["code"].as_str().unwrap().to_string();
+    assert!(started.get("token").is_none());
+    let pending = m.pairing_pending().expect("demande visible dans Fleuve");
+    assert_eq!(pending.code, code);
+    assert_eq!(pending.id, id);
+
+    // Une seule demande à la fois.
+    let r = c.post(&start).header("origin", ext).send().await.unwrap();
+    assert_eq!(r.status(), 429);
+
+    let poll = |origin: &'static str| {
+        let (c, status, id) = (c.clone(), status.clone(), id.clone());
+        async move {
+            let r = c.post(&status).header("origin", origin).header("content-type", "application/json")
+                .body(serde_json::json!({ "id": id }).to_string()).send().await.unwrap();
+            json_of(r).await
+        }
+    };
+    // Tant que l'utilisateur n'a rien dit : pas de jeton, pour personne.
+    assert_eq!(poll(ext).await["state"], "pending");
+    assert_eq!(poll("chrome-extension://autre").await["state"], "expired");
+
+    m.pair_decide(&id, true).unwrap();
+    let done = poll(ext).await;
+    assert_eq!(done["state"], "approved");
+    assert_eq!(done["token"], token.as_str());
+    // Le jeton n'est remis qu'une fois.
+    assert_eq!(poll(ext).await["state"], "expired");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn refused_pairing_gives_nothing_and_pauses_new_requests() {
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path()).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let app = fleuve_core::server::router(m.clone(), Arc::new(|_, _| {}));
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    let c = reqwest::Client::new();
+    let ext = "chrome-extension://abcdef";
+
+    let r = c.post(format!("http://{addr}/pair/start")).header("origin", ext).send().await.unwrap();
+    let started = json_of(r).await;
+    let id = started["id"].as_str().unwrap();
+    m.pair_decide(id, false).unwrap();
+    assert!(m.pairing_pending().is_none());
+
+    let r = c.post(format!("http://{addr}/pair/status")).header("origin", ext).header("content-type", "application/json")
+        .body(serde_json::json!({ "id": id }).to_string()).send().await.unwrap();
+    let v = json_of(r).await;
+    assert_eq!(v["state"], "denied");
+    assert!(v.get("token").is_none());
+
+    let r = c.post(format!("http://{addr}/pair/start")).header("origin", ext).send().await.unwrap();
+    assert_eq!(r.status(), 429);
+}
+
+async fn json_of(r: reqwest::Response) -> serde_json::Value {
+    serde_json::from_slice(&r.bytes().await.unwrap()).unwrap()
 }

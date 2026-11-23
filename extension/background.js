@@ -1,4 +1,12 @@
-import { extOf, getSettings, isStreamFragment, isVideoSite, sendToFleuve } from "./common.js";
+import {
+  cleanTitle,
+  extOf,
+  getSettings,
+  isStreamFragment,
+  isVideoSite,
+  listQualities,
+  sendToFleuve,
+} from "./common.js";
 
 // --- Menu contextuel « Télécharger avec Fleuve » ---------------------------
 chrome.runtime.onInstalled.addListener(async () => {
@@ -63,28 +71,69 @@ function flash(text, color) {
  * 3. flux HLS repéré dans l'onglet → moteur HLS ;
  * 4. sinon → yt-dlp tente de trouver la vidéo dans la page.
  */
-async function sendVideo({ src, pageUrl, tabId }) {
-  if (isVideoSite(pageUrl)) return sendToFleuve(pageUrl, { kind: "site" });
-  if (/^https?:/i.test(src) && !isStreamFragment(src)) {
-    return sendToFleuve(src, { referer: pageUrl, kind: extOf(src) === "m3u8" ? "hls" : "file" });
-  }
+function resolveVideo({ src, pageUrl, tabId }) {
+  return (async () => {
+    if (isVideoSite(pageUrl)) return { url: pageUrl, kind: "site" };
+    if (/^https?:/i.test(src) && !isStreamFragment(src)) {
+      return { url: src, referer: pageUrl, kind: extOf(src) === "m3u8" ? "hls" : "file" };
+    }
+    if (tabId != null) {
+      const list = (await chrome.storage.session.get(`tab:${tabId}`))[`tab:${tabId}`] || [];
+      const best = list.find((m) => m.kind === "hls") || list.find((m) => m.kind === "file");
+      if (best) return { url: best.url, referer: pageUrl, kind: best.kind };
+    }
+    return { url: pageUrl, kind: "site" };
+  })();
+}
+
+/**
+ * Nom de fichier voulu pour une vidéo : le titre de la page de l'onglet (celui du
+ * haut de page, pas celui d'un lecteur intégré), débarrassé du nom du site.
+ */
+async function pageTitle(tabId, fallback, fallbackUrl) {
+  let title = "";
+  let url = fallbackUrl;
   if (tabId != null) {
-    const list = (await chrome.storage.session.get(`tab:${tabId}`))[`tab:${tabId}`] || [];
-    const best = list.find((m) => m.kind === "hls") || list.find((m) => m.kind === "file");
-    if (best) return sendToFleuve(best.url, { referer: pageUrl, kind: best.kind });
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      title = tab.title || "";
+      url = tab.url || url;
+    } catch {}
   }
-  return sendToFleuve(pageUrl, { kind: "site" });
+  return cleanTitle(title || fallback, url);
+}
+
+async function sendVideo({ src, pageUrl, tabId, title, quality }) {
+  const v = await resolveVideo({ src, pageUrl, tabId });
+  // Les vidéos de sites sont déjà nommées d'après leur vrai titre par yt-dlp.
+  const name = v.kind === "site" ? null : await pageTitle(tabId, title, pageUrl);
+  return sendToFleuve(v.url, { referer: v.referer ?? null, kind: v.kind, title: name, quality });
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, reply) => {
-  if (msg?.type !== "fleuve-video") return;
-  sendVideo({ src: msg.src, pageUrl: msg.pageUrl || sender.url, tabId: sender.tab?.id })
-    .then(() => {
-      flash("↓", "#1b6fd8");
-      reply({ ok: true });
-    })
-    .catch((e) => reply({ ok: false, error: e.message }));
-  return true; // réponse asynchrone
+  const pageUrl = msg?.pageUrl || sender.url;
+  const tabId = sender.tab?.id;
+  if (msg?.type === "fleuve-video") {
+    sendVideo({ src: msg.src, pageUrl, tabId, title: msg.title, quality: msg.quality })
+      .then(() => {
+        flash("↓", "#1b6fd8");
+        reply({ ok: true });
+      })
+      .catch((e) => reply({ ok: false, error: e.message }));
+    return true; // réponse asynchrone
+  }
+  if (msg?.type === "fleuve-qualities") {
+    // Qualités proposées par la vidéo survolée (menu « ▾ » du bouton).
+    resolveVideo({ src: msg.src, pageUrl, tabId })
+      .then(async (v) => ({
+        ok: true,
+        kind: v.kind,
+        qualities: v.kind === "file" ? [] : await listQualities(v.url, v.referer ?? null),
+      }))
+      .then(reply)
+      .catch((e) => reply({ ok: false, error: e.message }));
+    return true;
+  }
 });
 
 // --- Interception des téléchargements du navigateur -------------------------

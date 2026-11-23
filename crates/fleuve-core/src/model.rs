@@ -116,9 +116,22 @@ pub struct DownloadRecord {
     /// Vidéo en attente du choix de qualité (réglage « Demander à chaque fois »).
     #[serde(default)]
     pub quality_pending: bool,
+    /// Titre de la vidéo donné par le navigateur (titre de la page) : le nom du
+    /// fichier en est tiré, l'extension étant choisie une fois le type connu.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 impl DownloadRecord {
+    /// Applique l'extension `ext` au nom de fichier, sans abîmer un titre qui
+    /// contient des points (« Épisode 1.5 »).
+    pub fn set_video_ext(&mut self, ext: &str) {
+        self.file_name = match &self.title {
+            Some(t) => crate::util::titled_name(t, Some(ext)),
+            None => crate::util::with_extension(&self.file_name, ext),
+        };
+    }
+
     /// Octets reçus, calculés à partir des segments quand il y en a.
     pub fn received(&self) -> u64 {
         if self.kind == Kind::File && self.resumable && !self.segments.is_empty() {
@@ -201,6 +214,10 @@ pub struct AddRequest {
     /// Qualité vidéo : « best » ou une hauteur (« 720 »). Absent : selon les réglages.
     #[serde(default)]
     pub quality: Option<String>,
+    /// Titre de la vidéo (titre de la page). Sert de nom de fichier quand
+    /// `file_name` est absent ; l'extension est déduite du lien et du serveur.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

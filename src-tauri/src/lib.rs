@@ -1,6 +1,6 @@
 //! Couche Tauri : relie le moteur `fleuve-core` à l'interface React.
 
-use fleuve_core::{server, AddRequest, DownloadView, Manager as Engine, QualityOption, RequestHeaders, Settings};
+use fleuve_core::{server, AddRequest, DownloadView, Manager as Engine, PairingInfo, QualityOption, RequestHeaders, Settings};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
@@ -72,6 +72,17 @@ async fn probe_qualities_for(engine: State<'_, Engine>, id: String) -> CmdResult
     engine.probe_qualities_for(&id).await.map_err(err)
 }
 
+/// Demande d'appairage d'une extension qui attend la décision de l'utilisateur.
+#[tauri::command]
+fn pairing_pending(engine: State<'_, Engine>) -> Option<PairingInfo> {
+    engine.pairing_pending()
+}
+
+#[tauri::command]
+fn pairing_decide(engine: State<'_, Engine>, id: String, approve: bool) -> CmdResult<()> {
+    engine.pair_decide(&id, approve).map_err(err)
+}
+
 #[tauri::command]
 fn get_settings(engine: State<'_, Engine>) -> Settings {
     engine.settings()
@@ -117,10 +128,25 @@ pub fn run() {
             let watched = engine.clone();
             tauri::async_runtime::spawn(async move {
                 let mut rx = watched.subscribe();
+                let mut last_pairing: Option<String> = None;
                 loop {
                     match rx.recv().await {
                         Ok(()) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {
                             let _ = handle.emit("downloads", watched.list());
+                            // Appairage d'une extension : la demande s'affiche, et la
+                            // fenêtre passe au premier plan quand une nouvelle arrive.
+                            let pairing = watched.pairing_pending();
+                            let id = pairing.as_ref().map(|p| p.id.clone());
+                            if id != last_pairing {
+                                let _ = handle.emit("pairing", pairing);
+                                if id.is_some() {
+                                    if let Some(w) = handle.get_webview_window("main") {
+                                        let _ = w.show();
+                                        let _ = w.set_focus();
+                                    }
+                                }
+                                last_pairing = id;
+                            }
                         }
                         Err(_) => break,
                     }
@@ -165,6 +191,8 @@ pub fn run() {
             resume_download,
             schedule_download,
             remove_download,
+            pairing_pending,
+            pairing_decide,
             get_settings,
             save_settings,
             open_download,

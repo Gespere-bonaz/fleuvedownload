@@ -6,6 +6,7 @@
 //! (en-tête `Origin` autre qu'une extension).
 
 use crate::model::{AddRequest, Kind, RequestHeaders};
+use crate::pairing::PairPoll;
 use crate::Manager;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -47,17 +48,37 @@ struct ExtensionAdd {
     /// Ajouter sans démarrer (« Télécharger plus tard »).
     #[serde(default)]
     start_paused: bool,
+    /// Qualité voulue pour une vidéo : « best », « ask » ou une hauteur (« 720 »).
+    /// Absent : réglage de Fleuve.
+    #[serde(default)]
+    quality: Option<String>,
+    /// Titre de la vidéo (titre de la page), utilisé comme nom de fichier.
+    #[serde(default)]
+    title: Option<String>,
+}
+
+/// Demande des qualités disponibles pour un lien vidéo.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QualitiesQuery {
+    url: String,
+    #[serde(default)]
+    referer: Option<String>,
+    #[serde(default)]
+    cookie: Option<String>,
+    #[serde(default)]
+    user_agent: Option<String>,
 }
 
 fn yes() -> bool {
     true
 }
 
+const EXTENSION_ORIGINS: [&str; 3] = ["chrome-extension://", "moz-extension://", "safari-web-extension://"];
+
 fn check(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, Json<Value>)> {
     if let Some(origin) = headers.get("origin").and_then(|o| o.to_str().ok()) {
-        let ok = ["chrome-extension://", "moz-extension://", "safari-web-extension://"]
-            .iter()
-            .any(|p| origin.starts_with(p));
+        let ok = EXTENSION_ORIGINS.iter().any(|p| origin.starts_with(p));
         if !ok {
             return Err((StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "origine refusée"}))));
         }
@@ -112,6 +133,8 @@ async fn add(
             _ => None,
         },
         start_paused: body.start_paused,
+        quality: body.quality.filter(|q| !q.trim().is_empty()),
+        title: body.title,
         ..Default::default()
     };
     match state.manager.add(req) {
@@ -125,10 +148,86 @@ async fn add(
     }
 }
 
+/// Qualités proposées par un lien vidéo (flux HLS ou site vidéo), de la
+/// meilleure à la plus basse. Liste vide : une seule qualité, ou pas une vidéo.
+async fn qualities(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<QualitiesQuery>,
+) -> (StatusCode, Json<Value>) {
+    if let Err(e) = check(&state, &headers) {
+        return e;
+    }
+    if !Manager::is_video_url(&body.url) {
+        return (StatusCode::OK, Json(json!({"ok": true, "qualities": []})));
+    }
+    let h = RequestHeaders { referer: body.referer, cookie: body.cookie, user_agent: body.user_agent };
+    match state.manager.probe_qualities(&body.url, &h).await {
+        Ok(list) => (StatusCode::OK, Json(json!({"ok": true, "qualities": list}))),
+        Err(e) => (StatusCode::BAD_REQUEST, Json(json!({"ok": false, "error": e.to_string()}))),
+    }
+}
+
+/// L'origine d'une extension de navigateur. Contrairement aux autres routes,
+/// l'appairage exige cet en-tête : un programme local qui n'en envoie pas
+/// (curl, script) est refusé d'emblée.
+fn extension_origin(headers: &HeaderMap) -> Result<String, (StatusCode, Json<Value>)> {
+    let refused = || (StatusCode::FORBIDDEN, Json(json!({"ok": false, "error": "origine refusée"})));
+    let origin = headers.get("origin").and_then(|o| o.to_str().ok()).ok_or_else(refused)?;
+    if !EXTENSION_ORIGINS.iter().any(|p| origin.starts_with(p)) {
+        return Err(refused());
+    }
+    Ok(origin.to_string())
+}
+
+/// Début de l'appairage : crée une demande, que l'utilisateur doit accepter
+/// dans Fleuve après avoir comparé le code. Pas de jeton ici (c'est le but).
+async fn pair_start(State(state): State<AppState>, headers: HeaderMap) -> (StatusCode, Json<Value>) {
+    let origin = match extension_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
+    match state.manager.pair_start(&origin) {
+        Ok((id, code)) => (
+            StatusCode::OK,
+            Json(json!({"ok": true, "id": id, "code": code, "expiresIn": crate::pairing::TTL.as_secs()})),
+        ),
+        Err(e) => (StatusCode::TOO_MANY_REQUESTS, Json(json!({"ok": false, "error": e.to_string()}))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PairStatusQuery {
+    id: String,
+}
+
+/// L'extension demande où en est sa demande. Le jeton n'est renvoyé qu'après
+/// l'accord de l'utilisateur, une seule fois, à l'extension qui a fait la demande.
+async fn pair_status(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<PairStatusQuery>,
+) -> (StatusCode, Json<Value>) {
+    let origin = match extension_origin(&headers) {
+        Ok(o) => o,
+        Err(e) => return e,
+    };
+    let reply = match state.manager.pair_poll(&body.id, &origin) {
+        PairPoll::Pending => json!({"ok": true, "state": "pending"}),
+        PairPoll::Approved(token) => json!({"ok": true, "state": "approved", "token": token}),
+        PairPoll::Denied => json!({"ok": true, "state": "denied"}),
+        PairPoll::Expired => json!({"ok": true, "state": "expired"}),
+    };
+    (StatusCode::OK, Json(reply))
+}
+
 pub fn router(manager: Manager, on_added: OnAdded) -> Router {
     Router::new()
         .route("/ping", get(ping))
         .route("/add", post(add))
+        .route("/qualities", post(qualities))
+        .route("/pair/start", post(pair_start))
+        .route("/pair/status", post(pair_status))
         .with_state(AppState { manager, on_added })
 }
 

@@ -206,7 +206,7 @@ pub(crate) async fn run_hls(inner: &Arc<Inner>, item: &Arc<Item>, token: &Cancel
     {
         let mut r = item.rec.lock().unwrap();
         if !r.name_fixed {
-            r.file_name = util::with_extension(&r.file_name, if fmp4 { "mp4" } else { "ts" });
+            r.set_video_ext(if fmp4 { "mp4" } else { "ts" });
             r.category = "Vidéos".into();
         }
     }

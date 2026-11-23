@@ -7,9 +7,11 @@ pub mod hls;
 pub mod limiter;
 pub mod manager;
 pub mod model;
+pub mod pairing;
 pub mod server;
 pub mod site;
 pub mod util;
 
 pub use manager::Manager;
 pub use model::*;
+pub use pairing::{PairError, PairPoll, PairingInfo};
