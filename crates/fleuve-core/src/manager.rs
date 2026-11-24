@@ -15,6 +15,9 @@ use tokio_util::sync::CancellationToken;
 const STATE_FILE: &str = "downloads.json";
 const SETTINGS_FILE: &str = "settings.json";
 
+/// Une seule sauvegarde à la fois (voir `Inner::save_state`).
+static SAVE_LOCK: Mutex<()> = Mutex::new(());
+
 /// Un téléchargement en mémoire.
 pub(crate) struct Item {
     pub id: String,
@@ -117,6 +120,7 @@ pub(crate) struct Inner {
     wake: Notify,
     dirty: AtomicBool,
     changes: broadcast::Sender<()>,
+    pairing: Mutex<crate::pairing::Pairing>,
 }
 
 impl Inner {
@@ -130,6 +134,9 @@ impl Inner {
     }
 
     pub fn save_state(&self) -> Result<()> {
+        // Photo et écriture sont faites ensemble : une photo plus ancienne ne peut
+        // pas être écrite après une plus récente (une pause ne « revient » pas).
+        let _save = SAVE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let records: Vec<DownloadRecord> = self
             .items
             .lock()
@@ -141,6 +148,7 @@ impl Inner {
     }
 
     fn save_settings(&self) -> Result<()> {
+        let _save = SAVE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let s = self.settings();
         write_json_atomic(&self.data_dir.join(SETTINGS_FILE), &s)
     }
@@ -229,11 +237,20 @@ impl Inner {
     }
 }
 
+/// Écrit un fichier JSON d'un seul coup : écriture dans un fichier temporaire,
+/// puis renommage. Le fichier temporaire a un nom unique et les écritures sont
+/// l'une après l'autre : deux sauvegardes simultanées (minuteur, pause, ajout…)
+/// ne peuvent plus se marcher dessus, ni renommer un fichier déjà renommé.
 fn write_json_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
-    let tmp = path.with_extension("json.tmp");
+    static FILE_LOCK: Mutex<()> = Mutex::new(());
+    let tmp = path.with_extension(format!("json.{}.tmp", uuid::Uuid::new_v4().simple()));
     let data = serde_json::to_vec_pretty(value)?;
+    let _guard = FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::fs::write(&tmp, data).with_context(|| format!("écriture de {}", tmp.display()))?;
-    std::fs::rename(&tmp, path)?;
+    if let Err(e) = std::fs::rename(&tmp, path) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e).with_context(|| format!("remplacement de {}", path.display()));
+    }
     Ok(())
 }
 
@@ -285,6 +302,7 @@ impl Manager {
             wake: Notify::new(),
             dirty: AtomicBool::new(false),
             changes,
+            pairing: Mutex::new(Default::default()),
         });
         inner.save_settings()?;
 
@@ -324,6 +342,40 @@ impl Manager {
     /// Reçoit un signal à chaque changement visible (pour rafraîchir l'interface).
     pub fn subscribe(&self) -> broadcast::Receiver<()> {
         self.inner.changes.subscribe()
+    }
+
+    // --- Appairage de l'extension navigateur ---------------------------------
+
+    /// Une extension demande à être appairée : (identifiant de la demande, code).
+    /// L'interface en est informée ; la demande expire seule au bout d'une minute.
+    pub fn pair_start(&self, origin: &str) -> Result<(String, String), crate::pairing::PairError> {
+        let started = self.inner.pairing.lock().unwrap().start(origin, Instant::now())?;
+        self.inner.mark_dirty();
+        // À l'expiration, on prévient l'interface pour qu'elle ferme la fenêtre.
+        let inner = self.inner.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(crate::pairing::TTL + Duration::from_secs(1)).await;
+            inner.mark_dirty();
+        });
+        Ok(started)
+    }
+
+    /// La demande d'appairage qui attend la décision de l'utilisateur.
+    pub fn pairing_pending(&self) -> Option<crate::pairing::PairingInfo> {
+        self.inner.pairing.lock().unwrap().pending(Instant::now())
+    }
+
+    /// L'utilisateur accepte ou refuse la demande `id`.
+    pub fn pair_decide(&self, id: &str, approve: bool) -> Result<(), crate::pairing::PairError> {
+        self.inner.pairing.lock().unwrap().decide(id, approve, Instant::now())?;
+        self.inner.mark_dirty();
+        Ok(())
+    }
+
+    /// L'extension demande où en est sa demande ; le jeton n'est remis que si elle est acceptée.
+    pub fn pair_poll(&self, id: &str, origin: &str) -> crate::pairing::PairPoll {
+        let token = self.inner.settings().extension_token;
+        self.inner.pairing.lock().unwrap().poll(id, origin, &token, Instant::now())
     }
 
     pub fn list(&self) -> Vec<DownloadView> {
@@ -366,6 +418,21 @@ impl Manager {
         }
         if kind == Kind::Site && !name_fixed {
             file_name = "Vidéo (recherche du titre…)".into();
+        }
+        // Titre de la page : devient le nom du fichier (yt-dlp, lui, nomme déjà
+        // les vidéos de sites d'après leur vrai titre).
+        let title = req
+            .title
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty() && !name_fixed && kind != Kind::Site)
+            .map(str::to_string);
+        if let Some(t) = &title {
+            file_name = if kind == Kind::Hls {
+                util::titled_name(t, Some("ts"))
+            } else {
+                util::titled_name(t, util::ext_of(&file_name))
+            };
         }
         let category = if kind == Kind::Site {
             "Vidéos".to_string()
@@ -416,6 +483,7 @@ impl Manager {
             error: None,
             max_height,
             quality_pending,
+            title,
         };
         let id = rec.id.clone();
         self.inner.items.lock().unwrap().push(Item::new(rec));
@@ -674,5 +742,40 @@ pub(crate) fn test_item(segments: Vec<Segment>) -> Arc<Item> {
         error: None,
         max_height: None,
         quality_pending: false,
+        title: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Plusieurs sauvegardes simultanées du même fichier ne doivent jamais échouer
+    /// (avant : un fichier temporaire commun, renommé deux fois → « fichier introuvable »),
+    /// ni laisser de fichier temporaire derrière elles.
+    #[test]
+    fn concurrent_saves_never_fail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("etat.json");
+        let threads: Vec<_> = (0..8)
+            .map(|t| {
+                let path = path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..150 {
+                        write_json_atomic(&path, &vec![t, i]).expect("écriture concurrente");
+                    }
+                })
+            })
+            .collect();
+        for t in threads {
+            t.join().unwrap();
+        }
+        let last: Vec<i32> = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(last.len(), 2, "fichier final lisible et complet");
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(left, vec!["etat.json".to_string()], "aucun fichier temporaire oublié");
+    }
 }

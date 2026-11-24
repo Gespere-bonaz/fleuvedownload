@@ -222,7 +222,7 @@ async fn run_file(inner: &Arc<Inner>, item: &Arc<Item>, token: &CancellationToke
             let mut r = item.rec.lock().unwrap();
             r.kind = Kind::Hls;
             if !r.name_fixed {
-                r.file_name = util::with_extension(&r.file_name, "ts");
+                r.set_video_ext("ts");
                 r.category = "Vidéos".into();
             }
         }
@@ -260,7 +260,22 @@ async fn run_file(inner: &Arc<Inner>, item: &Arc<Item>, token: &CancellationToke
         return crate::site::run_site(inner, item, token).await;
     }
 
-    let (dir, name) = settle_name(item, p.file_name.clone())?;
+    // Avec un titre fourni par le navigateur, le nom est « titre.extension » :
+    // l'extension vient du nom donné par le serveur, à défaut du type du contenu.
+    let suggested = {
+        let r = item.rec.lock().unwrap();
+        let name = match (&r.title, &p.file_name) {
+            (Some(t), Some(n)) => Some(util::titled_name(t, util::ext_of(n))),
+            (Some(t), None) => p
+                .content_type
+                .as_deref()
+                .and_then(util::ext_from_mime)
+                .map(|e| util::titled_name(t, Some(e))),
+            (None, n) => n.clone(),
+        };
+        name
+    };
+    let (dir, name) = settle_name(item, suggested)?;
     let part = util::part_path(&dir, &name);
     let final_path = dir.join(&name);
 

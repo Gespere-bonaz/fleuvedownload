@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { api } from "./api";
-import type { AddRequest, DownloadView, Settings } from "./types";
+import type { AddRequest, DownloadView, PairingInfo, Settings } from "./types";
 import { CATEGORIES, IS_LINUX, IS_MAC, MOD_KEY, CATEGORY_COLOR, STATUS_LABEL, extensionOf, formatBytes, formatDate, formatEta, formatSpeed } from "./format";
 import { SegmentBar } from "./components/SegmentBar";
 import { WindowControls } from "./components/WindowControls";
-import { AddDialog, ConfirmClear, ConfirmRemove, QualityDialog, ScheduleDialog, SettingsDialog } from "./components/Dialogs";
+import { AddDialog, ConfirmClear, ConfirmRemove, PairingDialog, QualityDialog, ScheduleDialog, SettingsDialog } from "./components/Dialogs";
 import { qualityLabel } from "./components/Quality";
 
 type Filter =
@@ -62,6 +62,7 @@ export default function App() {
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [pairing, setPairing] = useState<PairingInfo | null>(null);
 
   const notify = useCallback((msg: string) => {
     setToast(msg);
@@ -71,7 +72,9 @@ export default function App() {
   useEffect(() => {
     api.list().then(setItems);
     api.getSettings().then(setSettings);
+    api.pairingPending().then(setPairing);
     const un = [
+      listen<PairingInfo | null>("pairing", (e) => setPairing(e.payload)),
       listen<DownloadView[]>("downloads", (e) => setItems(e.payload)),
       listen<string>("added-from-browser", (e) => {
         const id = e.payload;
@@ -367,6 +370,16 @@ export default function App() {
         )}
       </main>
 
+      {pairing && (
+        <PairingDialog
+          pairing={pairing}
+          onDecide={async (approve) => {
+            setPairing(null);
+            await api.pairingDecide(pairing.id, approve).catch((e) => notify(String(e)));
+            if (approve) notify("Extension connectée");
+          }}
+        />
+      )}
       {dialog?.kind === "add" && settings && (
         <AddDialog
           initialUrl={dialog.url}

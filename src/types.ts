@@ -67,6 +67,16 @@ export interface AddRequest {
   quality?: string | null;
 }
 
+/** Une extension du navigateur demande à être appairée avec Fleuve. */
+export interface PairingInfo {
+  id: string;
+  /** Code à comparer avec celui affiché par l'extension. */
+  code: string;
+  /** Origine de l'extension (« chrome-extension://… »). */
+  origin: string;
+  expiresIn: number;
+}
+
 export interface Settings {
   downloadDir: string;
   connections: number;

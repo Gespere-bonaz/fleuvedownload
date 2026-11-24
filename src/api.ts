@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AddRequest, DownloadView, QualityOption, Settings } from "./types";
+import type { AddRequest, DownloadView, PairingInfo, QualityOption, Settings } from "./types";
 
 export const api = {
   list: () => invoke<DownloadView[]>("list_downloads"),
@@ -17,5 +17,7 @@ export const api = {
   setQuality: (id: string, quality: string) => invoke<void>("set_quality", { id, quality }),
   isVideoUrl: (url: string) => invoke<boolean>("is_video_url", { url }),
   probeQualities: (url: string, referer?: string | null) => invoke<QualityOption[]>("probe_qualities", { url, referer: referer || null }),
+  pairingPending: () => invoke<PairingInfo | null>("pairing_pending"),
+  pairingDecide: (id: string, approve: boolean) => invoke<void>("pairing_decide", { id, approve }),
   probeQualitiesFor: (id: string) => invoke<QualityOption[]>("probe_qualities_for", { id }),
 };

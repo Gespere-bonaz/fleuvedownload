@@ -130,6 +130,7 @@ td.col-progress .segbar { display: inline-block; width: calc(100% - 46px); verti
 .modal__backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, .28); display: flex; align-items: flex-start; justify-content: center; padding-top: 70px; z-index: 10; }
 .modal { width: 520px; max-width: calc(100vw - 40px); background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, .25); }
 .modal__title { margin: 0 0 14px; font-size: 15px; }
+.pairing__code { font-size: 34px; font-weight: 700; letter-spacing: .3em; text-align: center; margin: 14px 0; user-select: text; -webkit-user-select: text; }
 .modal__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .form { display: flex; flex-direction: column; gap: 12px; }
 .field { display: flex; flex-direction: column; gap: 5px; border: 0; padding: 0; margin: 0; }

@@ -59,6 +59,45 @@ pub fn sanitize_file_name(name: &str) -> String {
     }
 }
 
+/// Extension (sans point) d'un nom de fichier, si elle ressemble à une vraie extension.
+pub fn ext_of(name: &str) -> Option<&str> {
+    let (stem, ext) = name.rsplit_once('.')?;
+    (!stem.is_empty() && (1..=5).contains(&ext.len()) && ext.chars().all(|c| c.is_ascii_alphanumeric())).then_some(ext)
+}
+
+/// Nom de fichier fait du titre d'une vidéo et d'une extension éventuelle.
+pub fn titled_name(title: &str, ext: Option<&str>) -> String {
+    let base = sanitize_file_name(title);
+    let base = base.trim_end_matches(['.', ' ']);
+    let base = if base.is_empty() { "telechargement" } else { base };
+    match ext {
+        Some(e) => format!("{base}.{e}"),
+        None => base.to_string(),
+    }
+}
+
+/// Extension usuelle d'un type MIME de média ou d'archive.
+pub fn ext_from_mime(content_type: &str) -> Option<&'static str> {
+    let mime = content_type.split(';').next()?.trim().to_ascii_lowercase();
+    Some(match mime.as_str() {
+        "video/mp4" => "mp4",
+        "video/webm" => "webm",
+        "video/x-matroska" => "mkv",
+        "video/quicktime" => "mov",
+        "video/x-msvideo" => "avi",
+        "video/x-m4v" => "m4v",
+        "audio/mpeg" => "mp3",
+        "audio/mp4" | "audio/x-m4a" => "m4a",
+        "audio/aac" => "aac",
+        "audio/ogg" => "ogg",
+        "audio/flac" => "flac",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "application/zip" => "zip",
+        "application/pdf" => "pdf",
+        _ => return None,
+    })
+}
+
 /// Nom de fichier déduit du dernier élément du chemin de l'URL.
 pub fn file_name_from_url(url: &str) -> String {
     let name = url::Url::parse(url)
@@ -162,6 +201,19 @@ mod tests {
         assert_eq!(file_name_from_url("https://x.org/a/b/mon%20fichier.zip?x=1"), "mon fichier.zip");
         assert_eq!(file_name_from_url("https://x.org/"), "telechargement");
         assert_eq!(sanitize_file_name("../../etc/passwd"), "_.._etc_passwd");
+    }
+
+    #[test]
+    fn titled_names() {
+        assert_eq!(titled_name("Naruto - Épisode 12 : Le départ", Some("mp4")), "Naruto - Épisode 12 _ Le départ.mp4");
+        assert_eq!(titled_name("Épisode 1.5", Some("ts")), "Épisode 1.5.ts");
+        assert_eq!(titled_name("Titre...", None), "Titre");
+        assert_eq!(titled_name("  ", Some("mp4")), "telechargement.mp4");
+        assert_eq!(ext_of("film.mp4"), Some("mp4"));
+        assert_eq!(ext_of("download"), None);
+        assert_eq!(ext_of("Épisode 1.5 final"), None);
+        assert_eq!(ext_from_mime("video/mp4; codecs=avc1"), Some("mp4"));
+        assert_eq!(ext_from_mime("text/html"), None);
     }
 
     #[test]

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { QualitySelect, initialQuality } from "./Quality";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import type { AddRequest, Settings } from "../types";
+import type { AddRequest, PairingInfo, Settings } from "../types";
 
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   useEffect(() => {
@@ -335,6 +335,53 @@ export function SettingsDialog({
           </button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/** Navigateur d'après l'origine de l'extension qui demande l'appairage. */
+function browserName(origin: string): string {
+  if (origin.startsWith("moz-extension://")) return "Firefox";
+  if (origin.startsWith("safari-web-extension://")) return "Safari";
+  return "Chrome, Edge, Brave ou Arc";
+}
+
+/**
+ * Une extension du navigateur demande à se connecter à Fleuve. L'utilisateur
+ * compare le code avec celui affiché par l'extension avant d'accepter : sans
+ * « Autoriser », rien n'est transmis. Fermer la fenêtre revient à refuser.
+ */
+export function PairingDialog({
+  pairing,
+  onDecide,
+}: {
+  pairing: PairingInfo;
+  onDecide: (approve: boolean) => Promise<void>;
+}) {
+  const [left, setLeft] = useState(pairing.expiresIn);
+  useEffect(() => {
+    setLeft(pairing.expiresIn);
+    const t = window.setInterval(() => setLeft((s) => Math.max(0, s - 1)), 1000);
+    return () => window.clearInterval(t);
+  }, [pairing.id, pairing.expiresIn]);
+  return (
+    <Modal title="Connecter l'extension du navigateur ?" onClose={() => void onDecide(false)}>
+      <p className="hint">
+        Une extension ({browserName(pairing.origin)}) demande à envoyer des téléchargements à Fleuve. Vérifiez que
+        ce code est <b>le même</b> que celui affiché dans les options de l'extension :
+      </p>
+      <p className="pairing__code mono">{pairing.code}</p>
+      <p className="hint">
+        Si vous n'avez rien demandé, cliquez sur « Refuser ». Cette demande expire dans {left} s.
+      </p>
+      <div className="modal__actions">
+        <button className="btn" onClick={() => void onDecide(false)}>
+          Refuser
+        </button>
+        <button className="btn btn--primary" onClick={() => void onDecide(true)} disabled={left === 0}>
+          Autoriser
+        </button>
+      </div>
     </Modal>
   );
 }

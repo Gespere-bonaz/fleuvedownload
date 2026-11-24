@@ -20,6 +20,7 @@ Personal project by Gespère BONAZEBI — a **functional** reverse-engineering: 
 - **HLS video capture** (.m3u8): the best quality is picked automatically, chunks are downloaded in parallel and then merged.
 - **Site videos** (YouTube, Vimeo, …) through [yt-dlp](https://github.com/yt-dlp/yt-dlp) when it is installed.
 - **Choose the video quality**: in **Settings → Video quality**, pick *Ask every time* (Fleuve detects the qualities the site really offers and lets you choose, with the estimated size), *Always the best*, or a maximum (2160p to 360p). The quality can also be chosen for each link in the **Add** dialog. Works for HLS streams and site videos.
+- **Exact video names, quality picker in the browser**: the extension names a captured video after the page title (site name removed), and its popup and the **▾** menu next to the in-page *Download this video* button list the qualities the video really offers (1080p, 720p…). A default quality can be set in the extension options.
 - **Queue, scheduler, speed limit**, and automatic sorting by category.
 - **Native look on each system**: macOS style on the Mac; on Linux, a clean GNOME-inspired theme with an integrated header bar and rounded window corners. Light and dark mode follow the system.
 
@@ -86,8 +87,8 @@ npm run tauri build -- --target universal-apple-darwin
 
 1. Open `chrome://extensions` and turn on **Developer mode**.
 2. Click **Load unpacked** and pick the `extension/` folder.
-3. In Fleuve: **Settings → Extension token → Copy**.
-4. In the extension options: paste the token, then **Test connection**.
+3. Open Fleuve, then in the extension options click **Connect to Fleuve**: the extension shows a 4-digit code and Fleuve asks you to confirm the same code. Click **Authorize** in Fleuve and the token is exchanged automatically (it expires after one minute, and one request can be open at a time).
+4. Manual alternative: in Fleuve **Settings → Extension token → Copy**, paste it in the extension options, then **Test connection**.
 
 The link goes through `127.0.0.1:47821`, local only, protected by the token.
 If Fleuve is closed, the browser downloads normally.
